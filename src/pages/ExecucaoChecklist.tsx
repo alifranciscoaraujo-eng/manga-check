@@ -28,12 +28,18 @@ export default function ExecucaoChecklist() {
   const initId = useRef<string | null>(null)
 
   const carregar = useCallback(async (execId: string) => {
-    const e = await getExecucao(execId)
-    setExec(e)
-    const rs = e.status === 'finalizado' ? await getRespostas(e.id) : await iniciarExecucao(e)
-    setRespostas(rs)
-    setLoading(false)
-  }, [])
+    try {
+      const e = await getExecucao(execId)
+      setExec(e)
+      const rs = e.status === 'finalizado' ? await getRespostas(e.id) : await iniciarExecucao(e)
+      setRespostas(rs)
+    } catch {
+      // Sem acesso (RLS) ou inexistente → volta ao board.
+      navigate('/meus-checklists', { replace: true })
+    } finally {
+      setLoading(false)
+    }
+  }, [navigate])
 
   useEffect(() => {
     if (!id || initId.current === id) return
