@@ -46,7 +46,7 @@ export default function Login() {
   }
 
   function preencherDemo() {
-    setModo('login'); setEmail('yan@mangacheck.com'); setSenha('manga123'); setErro(''); setAviso('')
+    setModo('login'); setEmail('francisco@mangacheck.com'); setSenha('francisco123'); setErro(''); setAviso('')
   }
 
   return (

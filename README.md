@@ -25,8 +25,8 @@ npm run dev      # http://localhost:5400
 As credenciais do Supabase já vêm em `.env.local`. Conta de demonstração:
 
 ```
-e-mail: yan@mangacheck.com
-senha:  manga123
+e-mail: francisco@mangacheck.com
+senha:  francisco123
 ```
 
 ## Banco de dados
