@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
-import { TrendingUp, Trophy, Building2, Layers, Info, ChevronRight } from 'lucide-react'
+import { TrendingUp, Trophy, Layers, Clock, Info, ChevronRight, Store, Gauge } from 'lucide-react'
 import {
   getDashboardData, getExecucoesHoje, getUnidades, getSetores, getColaboradores,
   type DashboardData, type RankingItem,
 } from '../lib/queries'
 import type { Unidade, Setor, Colaborador, Execucao } from '../types'
-import { pct, iniciais } from '../lib/format'
+import { pct, iniciais, hhmm } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
 import ProgressBar from '../components/UI/ProgressBar'
 import StatusDot from '../components/UI/StatusDot'
@@ -40,11 +40,10 @@ export default function Dashboard() {
   const { nome } = useAuth()
   const navigate = useNavigate()
   const [periodo, setPeriodo] = useState<Periodo>('mes')
-  const [unidadeId, setUnidadeId] = useState('')
   const [setorId, setSetorId] = useState('')
   const [responsavelId, setResponsavelId] = useState('')
 
-  const [unidades, setUnidades] = useState<Unidade[]>([])
+  const [empresa, setEmpresa] = useState<string>('')
   const [setores, setSetores] = useState<Setor[]>([])
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([])
   const [hoje, setHoje] = useState<Execucao[]>([])
@@ -56,30 +55,45 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([getUnidades(), getSetores(), getColaboradores(), getExecucoesHoje()]).then(([u, s, c, h]) => {
-      setUnidades(u as Unidade[]); setSetores(s as Setor[]); setColaboradores(c as Colaborador[]); setHoje(h)
+      setEmpresa(((u as Unidade[])[0]?.nome) ?? '')
+      setSetores(s as Setor[]); setColaboradores(c as Colaborador[]); setHoje(h)
     })
   }, [])
 
   useEffect(() => {
     setLoading(true)
-    getDashboardData({ inicio, fim, unidade_id: unidadeId || undefined, setor_id: setorId || undefined, responsavel_id: responsavelId || undefined })
+    getDashboardData({ inicio, fim, setor_id: setorId || undefined, responsavel_id: responsavelId || undefined })
       .then(setData)
       .finally(() => setLoading(false))
-  }, [inicio, fim, unidadeId, setorId, responsavelId])
+  }, [inicio, fim, setorId, responsavelId])
 
   const m = data?.metricas
   const dataHoje = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })
+  const concluidosHoje = hoje.filter((e) => e.status === 'finalizado').length
 
   const evolucaoChart = (data?.evolucao ?? []).map((d) => ({ ...d, label: `${d.data.slice(8, 10)}/${d.data.slice(5, 7)}` }))
 
   return (
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto">
       {/* Cabeçalho */}
-      <div className="mb-5">
-        <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 tracking-tight">
-          {saudacao()}, {nome?.split(' ')[0] || 'gestor'}
-        </h1>
-        <p className="text-sm text-slate-500 capitalize">{dataHoje}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 tracking-tight">
+            {saudacao()}, {nome?.split(' ')[0] || 'gestor'}
+          </h1>
+          <p className="text-sm text-slate-500 flex items-center flex-wrap gap-x-2">
+            <span className="capitalize">{dataHoje}</span>
+            {empresa && <span className="text-slate-300">•</span>}
+            {empresa && <span className="font-medium text-slate-600 inline-flex items-center gap-1"><Store size={13} /> {empresa}</span>}
+          </p>
+        </div>
+        <div className="flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-sm">
+          <Gauge size={20} className="text-emerald-600" />
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-slate-400 leading-none">Score geral</p>
+            <p className="text-lg font-extrabold text-slate-800 leading-tight">{pct(m?.score ?? 0)}</p>
+          </div>
+        </div>
       </div>
 
       {/* Filtros */}
@@ -89,16 +103,12 @@ export default function Dashboard() {
           <option value="7">Últimos 7 dias</option>
           <option value="30">Últimos 30 dias</option>
         </select>
-        <select className="select-field w-auto" value={unidadeId} onChange={(e) => setUnidadeId(e.target.value)}>
-          <option value="">Todas as unidades</option>
-          {unidades.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
-        </select>
         <select className="select-field w-auto" value={setorId} onChange={(e) => setSetorId(e.target.value)}>
           <option value="">Todos os setores</option>
           {setores.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
         </select>
         <select className="select-field w-auto" value={responsavelId} onChange={(e) => setResponsavelId(e.target.value)}>
-          <option value="">Todos os usuários</option>
+          <option value="">Toda a equipe</option>
           {colaboradores.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
         </select>
       </div>
@@ -107,7 +117,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-5">
         <KpiTotal value={m?.total ?? 0} />
         <KpiCard label="Não iniciado" value={m?.naoIniciado ?? 0} total={m?.total ?? 0} tone="neutral" />
-        <KpiCard label="Iniciado, não finalizado" value={m?.emAndamento ?? 0} total={m?.total ?? 0} tone="amber" />
+        <KpiCard label="Em andamento" value={m?.emAndamento ?? 0} total={m?.total ?? 0} tone="amber" />
         <KpiCard label="Atrasado" value={m?.atrasado ?? 0} total={m?.total ?? 0} tone="red" />
         <KpiCard label="Finalizado" value={m?.finalizados ?? 0} total={m?.total ?? 0} tone="emerald" />
       </div>
@@ -116,7 +126,10 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-5">
         <div className="card p-5 xl:col-span-2">
           <div className="flex items-center justify-between mb-3">
-            <p className="font-semibold text-slate-800">Checklists do dia</p>
+            <div>
+              <p className="font-semibold text-slate-800">Checklists do dia</p>
+              <p className="text-xs text-slate-400">{concluidosHoje} de {hoje.length} concluídos</p>
+            </div>
             <button onClick={() => navigate('/meus-checklists')} className="text-sm font-medium text-emerald-600 flex items-center gap-0.5 hover:gap-1 transition-all">
               Ver todos <ChevronRight size={15} />
             </button>
@@ -125,13 +138,14 @@ export default function Dashboard() {
             <p className="text-sm text-slate-400 py-6 text-center">Nenhum checklist agendado para hoje.</p>
           ) : (
             <div className="divide-y divide-slate-50">
-              {hoje.slice(0, 7).map((e) => (
+              {hoje.slice(0, 8).map((e) => (
                 <div key={e.id} className="flex items-center gap-3 py-2.5">
+                  <span className="text-xs font-bold text-slate-700 w-10 shrink-0">{hhmm(e.horario_previsto)}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-slate-800 truncate">{e.modelo_nome}</p>
-                    <p className="text-xs text-slate-400 truncate">{e.responsavel_nome ?? '—'} · {e.unidade_nome ?? '—'}</p>
+                    <p className="text-xs text-slate-400 truncate">{e.setor_nome ?? '—'} · {e.responsavel_nome ?? '—'}</p>
                   </div>
-                  <div className="hidden sm:block w-28">
+                  <div className="hidden sm:block w-24">
                     <ProgressBar value={e.percentual} tone={progressoTone(e.status)} />
                   </div>
                   <span className="text-xs font-semibold text-slate-500 w-9 text-right">{e.percentual}%</span>
@@ -161,9 +175,9 @@ export default function Dashboard() {
 
       {/* Rankings */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-        <RankingCard titulo="Ranking por usuários" icon={Trophy} itens={data?.rankingUsuarios ?? []} avatar />
-        <RankingCard titulo="Ranking por unidades" icon={Building2} itens={data?.rankingUnidades ?? []} />
-        <RankingCard titulo="Ranking por setores" icon={Layers} itens={data?.rankingSetores ?? []} />
+        <RankingCard titulo="Ranking da equipe" icon={Trophy} itens={data?.rankingUsuarios ?? []} avatar />
+        <RankingCard titulo="Desempenho por setor" icon={Layers} itens={data?.rankingSetores ?? []} />
+        <RankingCard titulo="Desempenho por turno" icon={Clock} itens={data?.rankingTurnos ?? []} />
       </div>
 
       {/* Evolução */}

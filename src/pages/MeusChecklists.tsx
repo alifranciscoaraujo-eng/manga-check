@@ -101,7 +101,7 @@ function ChecklistCard({ ex, onOpen }: { ex: Execucao; onOpen: () => void }) {
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-slate-800 leading-tight truncate">{ex.modelo_nome}</p>
         <p className="text-xs text-slate-400 truncate mt-0.5">
-          {[ex.setor_nome, ex.unidade_nome, ex.responsavel_nome].filter(Boolean).join(' · ')}
+          {[ex.setor_nome, ex.responsavel_nome].filter(Boolean).join(' · ')}
         </p>
         <div className="flex items-center gap-2 mt-2">
           <ProgressBar value={ex.percentual} tone={progressoTone(ex.status)} className="flex-1 max-w-[220px]" />

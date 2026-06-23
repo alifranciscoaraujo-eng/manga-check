@@ -306,11 +306,18 @@ function ranking(execs: Execucao[], key: (e: Execucao) => string | null | undefi
     .sort((a, b) => b.score - a.score)
 }
 
+function turnoDe(e: Execucao): string | null {
+  if (!e.horario_previsto) return null
+  const h = parseInt(e.horario_previsto.slice(0, 2), 10)
+  if (Number.isNaN(h)) return null
+  return h < 12 ? 'Manhã' : h < 18 ? 'Tarde' : 'Noite'
+}
+
 export interface DashboardData {
   metricas: Metricas
   rankingUsuarios: RankingItem[]
-  rankingUnidades: RankingItem[]
   rankingSetores: RankingItem[]
+  rankingTurnos: RankingItem[]
   evolucao: { data: string; score: number; pontualidade: number; qualidade: number; esforco: number }[]
 }
 
@@ -339,8 +346,8 @@ export async function getDashboardData(f: DashboardFiltros): Promise<DashboardDa
   return {
     metricas: aggregate(execs),
     rankingUsuarios: ranking(execs, (e) => e.responsavel_nome),
-    rankingUnidades: ranking(execs, (e) => e.unidade_nome),
     rankingSetores: ranking(execs, (e) => e.setor_nome),
+    rankingTurnos: ranking(execs, turnoDe),
     evolucao,
   }
 }

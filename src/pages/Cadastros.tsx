@@ -13,7 +13,7 @@ import Badge from '../components/UI/Badge'
 type Tab = 'unidades' | 'setores' | 'colaboradores'
 
 const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: 'unidades', label: 'Unidades', icon: Building2 },
+  { id: 'unidades', label: 'Empresa', icon: Building2 },
   { id: 'setores', label: 'Setores', icon: Layers },
   { id: 'colaboradores', label: 'Equipe', icon: Users },
 ]
@@ -91,7 +91,7 @@ export default function Cadastros() {
     await carregar()
   }
 
-  const titulo = tab === 'unidades' ? 'Unidade' : tab === 'setores' ? 'Setor' : 'Colaborador'
+  const titulo = tab === 'unidades' ? 'Empresa' : tab === 'setores' ? 'Setor' : 'Colaborador'
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto">
