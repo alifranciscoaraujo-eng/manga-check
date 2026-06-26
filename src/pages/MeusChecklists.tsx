@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Calendar, CheckCircle2, AlertTriangle, ChevronRight } from 'lucide-react'
-import { getExecucoesHoje, getColaboradores } from '../lib/queries'
-import type { Execucao, Colaborador } from '../types'
+import { Calendar, CheckCircle2, AlertTriangle, ChevronRight, Plus } from 'lucide-react'
+import { getExecucoesHoje, getColaboradores, getModelos, criarExecucaoAvulsa } from '../lib/queries'
+import type { Execucao, Colaborador, Modelo } from '../types'
 import { hhmm } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
 import ProgressBar from '../components/UI/ProgressBar'
 import StatusDot from '../components/UI/StatusDot'
+import Modal from '../components/UI/Modal'
 
 function progressoTone(status: Execucao['status']): 'emerald' | 'amber' | 'red' | 'slate' {
   return status === 'finalizado' ? 'emerald' : status === 'atrasado' ? 'red' : status === 'em_andamento' ? 'amber' : 'slate'
@@ -17,22 +18,55 @@ export default function MeusChecklists() {
   const { colaborador, isColaborador } = useAuth()
   const [execucoes, setExecucoes] = useState<Execucao[]>([])
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([])
+  const [modelos, setModelos] = useState<Modelo[]>([])
   const [responsavelId, setResponsavelId] = useState('')
   const [loading, setLoading] = useState(true)
 
+  // estado do modal "novo checklist"
+  const [modalOpen, setModalOpen] = useState(false)
+  const [novoModeloId, setNovoModeloId] = useState('')
+  const [novoResponsavelId, setNovoResponsavelId] = useState('')
+  const [novoHorario, setNovoHorario] = useState('')
+  const [criando, setCriando] = useState(false)
+
+  async function carregar() {
+    const [ex, c, m] = await Promise.all([getExecucoesHoje(), getColaboradores(), getModelos()])
+    setExecucoes(ex)
+    setColaboradores(c as Colaborador[])
+    setModelos(m as Modelo[])
+  }
+
   useEffect(() => {
-    Promise.all([getExecucoesHoje(), getColaboradores()])
-      .then(([ex, c]) => {
-        setExecucoes(ex)
-        setColaboradores(c as Colaborador[])
-      })
-      .finally(() => setLoading(false))
+    carregar().finally(() => setLoading(false))
   }, [])
 
-  // Funcionário enxerga apenas os próprios checklists.
   useEffect(() => {
     if (isColaborador && colaborador) setResponsavelId(colaborador.id)
   }, [isColaborador, colaborador])
+
+  function abrirModal() {
+    setNovoModeloId(modelos[0]?.id ?? '')
+    setNovoResponsavelId(isColaborador && colaborador ? colaborador.id : '')
+    setNovoHorario('')
+    setModalOpen(true)
+  }
+
+  async function confirmarNovo() {
+    if (!novoModeloId) return
+    setCriando(true)
+    try {
+      const exec = await criarExecucaoAvulsa({
+        modelo_id: novoModeloId,
+        responsavel_id: novoResponsavelId || null,
+        horario: novoHorario || null,
+      })
+      setModalOpen(false)
+      await carregar()
+      navigate(`/meus-checklists/${exec.id}`)
+    } finally {
+      setCriando(false)
+    }
+  }
 
   const lista = useMemo(
     () => (responsavelId ? execucoes.filter((e) => e.responsavel_id === responsavelId) : execucoes),
@@ -50,12 +84,15 @@ export default function MeusChecklists() {
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 tracking-tight">Meus Checklists</h1>
           <p className="text-sm text-slate-500">Tarefas do dia, na ordem e no horário certo</p>
         </div>
-        {!isColaborador && (
-          <select className="select-field w-auto" value={responsavelId} onChange={(e) => setResponsavelId(e.target.value)}>
-            <option value="">Toda a equipe</option>
-            {colaboradores.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-          </select>
-        )}
+        <div className="flex items-center gap-2">
+          {!isColaborador && (
+            <select className="select-field w-auto" value={responsavelId} onChange={(e) => setResponsavelId(e.target.value)}>
+              <option value="">Toda a equipe</option>
+              {colaboradores.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          )}
+          <button onClick={abrirModal} className="btn-primary"><Plus size={16} /> Novo</button>
+        </div>
       </div>
 
       {/* Resumo do dia */}
@@ -86,6 +123,51 @@ export default function MeusChecklists() {
           ))}
         </div>
       )}
+
+      {/* Modal novo checklist avulso */}
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Novo checklist"
+        footer={
+          <>
+            <button onClick={() => setModalOpen(false)} className="btn-secondary">Cancelar</button>
+            <button onClick={confirmarNovo} disabled={criando || !novoModeloId} className="btn-primary">
+              {criando ? 'Criando...' : 'Iniciar'}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="label-field">Modelo de checklist</label>
+            <select className="select-field" value={novoModeloId} onChange={(e) => setNovoModeloId(e.target.value)}>
+              <option value="">Selecione…</option>
+              {modelos.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
+            </select>
+          </div>
+
+          {!isColaborador && (
+            <div>
+              <label className="label-field">Responsável</label>
+              <select className="select-field" value={novoResponsavelId} onChange={(e) => setNovoResponsavelId(e.target.value)}>
+                <option value="">— sem responsável —</option>
+                {colaboradores.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="label-field">Horário previsto (opcional)</label>
+            <input
+              type="time"
+              className="input-field"
+              value={novoHorario}
+              onChange={(e) => setNovoHorario(e.target.value)}
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

@@ -239,6 +239,48 @@ export async function uploadEvidencia(file: File): Promise<string> {
   return data.publicUrl
 }
 
+/** Cria uma execução avulsa (fora do cron) para hoje. */
+export async function criarExecucaoAvulsa(payload: {
+  modelo_id: string
+  responsavel_id?: string | null
+  horario?: string | null
+}): Promise<Execucao> {
+  const [{ data: modelo }, { data: respColab }] = await Promise.all([
+    supabase.from('mc_modelos').select('*').eq('id', payload.modelo_id).single(),
+    payload.responsavel_id
+      ? supabase.from('mc_colaboradores').select('nome').eq('id', payload.responsavel_id).single()
+      : Promise.resolve({ data: null }),
+  ])
+
+  let setor_nome: string | null = null
+  if (modelo?.setor_id) {
+    const { data: setor } = await supabase.from('mc_setores').select('nome').eq('id', modelo.setor_id).single()
+    setor_nome = setor?.nome ?? null
+  }
+
+  const hoje = new Date().toISOString().slice(0, 10)
+  const { data, error } = await supabase
+    .from('mc_execucoes')
+    .insert({
+      modelo_id: payload.modelo_id,
+      modelo_nome: modelo?.nome ?? '',
+      setor_id: modelo?.setor_id ?? null,
+      setor_nome,
+      responsavel_id: payload.responsavel_id ?? null,
+      responsavel_nome: (respColab as { nome?: string } | null)?.nome ?? null,
+      data: hoje,
+      horario_previsto: payload.horario ?? null,
+      status: 'nao_iniciado',
+      percentual: 0,
+      total_itens: 0,
+      itens_conformes: 0,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data as Execucao
+}
+
 // ════════════════════════════════════════════════════════════
 //  Dashboard / indicadores
 // ════════════════════════════════════════════════════════════
