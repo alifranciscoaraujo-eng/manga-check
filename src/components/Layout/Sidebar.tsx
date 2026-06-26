@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ListChecks, FileText, CalendarClock, Building2,
-  ClipboardCheck, X, LogOut,
+  ClipboardCheck, X, LogOut, AlertTriangle, BarChart2,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useMobileMenu } from '../../context/MobileMenuContext'
@@ -9,10 +9,19 @@ import { useAuth } from '../../hooks/useAuth'
 import { iniciais } from '../../lib/format'
 
 const navGestor = [
-  { section: '', items: [{ label: 'Dashboard', href: '/', icon: LayoutDashboard }] },
+  {
+    section: '',
+    items: [
+      { label: 'Dashboard', href: '/', icon: LayoutDashboard },
+      { label: 'Painel Executivo', href: '/painel-executivo', icon: BarChart2 },
+    ],
+  },
   {
     section: 'Operação',
-    items: [{ label: 'Meus Checklists', href: '/meus-checklists', icon: ListChecks }],
+    items: [
+      { label: 'Meus Checklists', href: '/meus-checklists', icon: ListChecks },
+      { label: 'Não Conformidades', href: '/nao-conformidades', icon: AlertTriangle },
+    ],
   },
   {
     section: 'Configuração',

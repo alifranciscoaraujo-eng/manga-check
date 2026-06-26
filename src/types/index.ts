@@ -88,6 +88,36 @@ export interface Execucao {
   created_at?: string
 }
 
+export type StatusNC = 'aberta' | 'em_andamento' | 'vencida' | 'concluida' | 'cancelada'
+export type CriticidadeNC = 'baixa' | 'media' | 'alta' | 'critica'
+
+export interface NaoConformidade {
+  id: string
+  execucao_id?: string | null
+  resposta_id?: string | null
+  modelo_id?: string | null
+  modelo_nome?: string | null
+  item_id?: string | null
+  item_descricao?: string | null
+  unidade_id?: string | null
+  setor_id?: string | null
+  setor_nome?: string | null
+  responsavel_id?: string | null
+  responsavel_nome?: string | null
+  titulo: string
+  descricao?: string | null
+  status: StatusNC
+  criticidade: CriticidadeNC
+  observacao?: string | null
+  foto_url?: string | null
+  prazo_correcao?: string | null
+  data_abertura: string
+  data_conclusao?: string | null
+  tratativa?: string | null
+  criado_em: string
+  atualizado_em: string
+}
+
 export interface Resposta {
   id: string
   execucao_id: string

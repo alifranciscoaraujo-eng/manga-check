@@ -7,6 +7,8 @@ import ExecucaoChecklist from './pages/ExecucaoChecklist'
 import Modelos from './pages/Modelos'
 import Agendamentos from './pages/Agendamentos'
 import Cadastros from './pages/Cadastros'
+import NaoConformidades from './pages/NaoConformidades'
+import PainelExecutivo from './pages/PainelExecutivo'
 
 /** Rotas de gestão: funcionário (colaborador) é redirecionado para seus checklists. */
 function RequireGestor({ children }: { children: React.ReactNode }) {
@@ -27,6 +29,8 @@ export default function App() {
             <Route path="modelos" element={<RequireGestor><Modelos /></RequireGestor>} />
             <Route path="agendamentos" element={<RequireGestor><Agendamentos /></RequireGestor>} />
             <Route path="cadastros" element={<RequireGestor><Cadastros /></RequireGestor>} />
+            <Route path="nao-conformidades" element={<RequireGestor><NaoConformidades /></RequireGestor>} />
+            <Route path="painel-executivo" element={<RequireGestor><PainelExecutivo /></RequireGestor>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

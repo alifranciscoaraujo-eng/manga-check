@@ -3,12 +3,12 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import {
   ArrowLeft, MapPin, FolderOpen, User, Check, X, MinusCircle,
-  Camera, Loader2, CheckCircle2,
+  Camera, Loader2, CheckCircle2, AlertTriangle, ListChecks, ChevronRight,
 } from 'lucide-react'
 import clsx from 'clsx'
 import {
   getExecucao, getRespostas, iniciarExecucao, updateResposta, updateExecucao,
-  finalizarExecucao, uploadEvidencia,
+  finalizarExecucao, uploadEvidencia, gerarNcSeNaoConforme,
 } from '../lib/queries'
 import type { Execucao, Resposta, StatusResposta } from '../types'
 import { hhmm } from '../lib/format'
@@ -23,6 +23,7 @@ export default function ExecucaoChecklist() {
   const [respostas, setRespostas] = useState<Resposta[]>([])
   const [loading, setLoading] = useState(true)
   const [finalizando, setFinalizando] = useState(false)
+  const [ncCount, setNcCount] = useState<number | null>(null)   // null = não finalizado ainda
 
   const readOnly = exec?.status === 'finalizado'
   const initId = useRef<string | null>(null)
@@ -34,7 +35,6 @@ export default function ExecucaoChecklist() {
       const rs = e.status === 'finalizado' ? await getRespostas(e.id) : await iniciarExecucao(e)
       setRespostas(rs)
     } catch {
-      // Sem acesso (RLS) ou inexistente → volta ao board.
       navigate('/meus-checklists', { replace: true })
     } finally {
       setLoading(false)
@@ -59,12 +59,17 @@ export default function ExecucaoChecklist() {
   }
 
   async function setStatus(r: Resposta, status: StatusResposta) {
-    if (readOnly) return
+    if (readOnly || !exec) return
     const respondido_em = new Date().toISOString()
-    const novas = respostas.map((x) => (x.id === r.id ? { ...x, status, respondido_em } : x))
+    const atualizada: Resposta = { ...r, status, respondido_em }
+    const novas = respostas.map((x) => (x.id === r.id ? atualizada : x))
     setRespostas(novas)
     await updateResposta(r.id, { status, respondido_em })
     await persistProgresso(novas)
+    // Geração automática de NC para itens não conformes
+    if (status === 'nao_conforme') {
+      await gerarNcSeNaoConforme(atualizada, exec)
+    }
   }
 
   async function setObservacao(r: Resposta, observacao: string) {
@@ -78,7 +83,9 @@ export default function ExecucaoChecklist() {
     setFinalizando(true)
     try {
       await finalizarExecucao(exec)
-      navigate('/meus-checklists')
+      const count = respostas.filter((r) => r.status === 'nao_conforme').length
+      setNcCount(count)
+      setExec((prev) => prev ? { ...prev, status: 'finalizado' } : prev)
     } finally {
       setFinalizando(false)
     }
@@ -86,12 +93,54 @@ export default function ExecucaoChecklist() {
 
   if (loading) return <div className="p-6 text-sm text-slate-400">Carregando checklist...</div>
   if (!exec) return <div className="p-6 text-sm text-slate-400">Checklist não encontrado.</div>
-  // Funcionário só acessa as próprias execuções.
   if (isColaborador && colaborador && exec.responsavel_id && exec.responsavel_id !== colaborador.id) {
     return <Navigate to="/meus-checklists" replace />
   }
 
   const todasRespondidas = total > 0 && respondidas === total
+
+  // Tela de conclusão
+  if (ncCount !== null) {
+    return (
+      <div className="p-4 sm:p-6 max-w-md mx-auto mt-8">
+        <div className="card p-8 text-center">
+          <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 size={32} className="text-emerald-600" />
+          </div>
+          <h2 className="text-xl font-extrabold text-slate-800 mb-2">Checklist finalizado!</h2>
+          <p className="text-sm text-slate-500 mb-5">
+            {exec.modelo_nome} concluído com sucesso.
+          </p>
+
+          {ncCount > 0 ? (
+            <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5 text-left">
+              <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-sm text-amber-900">
+                <span className="font-semibold">{ncCount} não conformidade{ncCount > 1 ? 's' : ''} gerada{ncCount > 1 ? 's' : ''}.</span>{' '}
+                Acesse o módulo de NCs para acompanhar as tratativas.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 mb-5 justify-center">
+              <CheckCircle2 size={16} className="text-emerald-600" />
+              <p className="text-sm text-emerald-800 font-medium">Todos os itens conformes!</p>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            {ncCount > 0 && !isColaborador && (
+              <button onClick={() => navigate('/nao-conformidades')} className="btn-primary w-full justify-center">
+                <AlertTriangle size={15} /> Ver não conformidades
+              </button>
+            )}
+            <button onClick={() => navigate('/meus-checklists')} className="btn-secondary w-full justify-center">
+              <ListChecks size={15} /> Voltar para checklists <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-4 sm:p-6 max-w-2xl mx-auto pb-28">
@@ -160,6 +209,8 @@ function ItemCard({
   const [uploading, setUploading] = useState(false)
   const [fotoUrl, setFotoUrl] = useState(r.foto_url ?? null)
 
+  const isNaoConforme = r.status === 'nao_conforme'
+
   async function handleFoto(file: File) {
     setUploading(true)
     try {
@@ -172,11 +223,23 @@ function ItemCard({
   }
 
   return (
-    <div className="card p-4">
+    <div className={clsx(
+      'card p-4 transition-colors',
+      isNaoConforme && 'border-red-200 bg-red-50/30',
+    )}>
       <div className="flex gap-3">
-        <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-500 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{index}</span>
+        <span className={clsx(
+          'w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center shrink-0 mt-0.5',
+          isNaoConforme ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500',
+        )}>{index}</span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-slate-800">{r.item_descricao}</p>
+          <p className={clsx('text-sm font-medium', isNaoConforme ? 'text-red-900' : 'text-slate-800')}>{r.item_descricao}</p>
+
+          {isNaoConforme && (
+            <div className="flex items-center gap-1.5 mt-1.5 text-xs text-red-600 font-medium">
+              <AlertTriangle size={12} /> NC será gerada automaticamente
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-2 mt-3">
             <StatusButton active={r.status === 'conforme'} onClick={() => onStatus(r, 'conforme')} disabled={readOnly} tone="emerald" icon={Check} label="Conforme" />
@@ -184,7 +247,8 @@ function ItemCard({
             <StatusButton active={r.status === 'na'} onClick={() => onStatus(r, 'na')} disabled={readOnly} tone="slate" icon={MinusCircle} label="N/A" />
           </div>
 
-          {r.exige_foto && (
+          {/* Foto — aparece com destaque quando não conforme */}
+          {(r.exige_foto || isNaoConforme) && (
             <div className="mt-3">
               {fotoUrl ? (
                 <div className="flex items-center gap-2">
@@ -197,10 +261,15 @@ function ItemCard({
                 <button
                   onClick={() => fileRef.current?.click()}
                   disabled={readOnly || uploading}
-                  className="flex items-center gap-2 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 hover:bg-emerald-100 transition-colors disabled:opacity-60"
+                  className={clsx(
+                    'flex items-center gap-2 text-xs font-medium rounded-lg px-3 py-2 transition-colors disabled:opacity-60',
+                    isNaoConforme
+                      ? 'text-red-700 bg-red-50 border border-red-200 hover:bg-red-100'
+                      : 'text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100',
+                  )}
                 >
                   {uploading ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
-                  {uploading ? 'Enviando...' : 'Anexar foto de evidência'}
+                  {uploading ? 'Enviando...' : isNaoConforme ? 'Anexar evidência da falha' : 'Anexar foto de evidência'}
                 </button>
               )}
               <input
@@ -214,15 +283,16 @@ function ItemCard({
             </div>
           )}
 
+          {/* Observação — obrigatória quando não conforme */}
           {!readOnly ? (
             <input
-              className="input-field mt-3 text-sm"
-              placeholder="Observação (opcional)"
+              className={clsx('input-field mt-3 text-sm', isNaoConforme && 'border-red-200 focus:ring-red-500/50 focus:border-red-400')}
+              placeholder={isNaoConforme ? 'Descreva a falha observada (recomendado)' : 'Observação (opcional)'}
               defaultValue={r.observacao ?? ''}
               onBlur={(e) => { if (e.target.value !== (r.observacao ?? '')) onObs(r, e.target.value) }}
             />
           ) : (
-            r.observacao && <p className="text-xs text-slate-500 mt-2 italic">“{r.observacao}”</p>
+            r.observacao && <p className="text-xs text-slate-500 mt-2 italic">"{r.observacao}"</p>
           )}
         </div>
       </div>

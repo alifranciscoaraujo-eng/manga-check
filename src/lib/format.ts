@@ -46,6 +46,21 @@ export function dataBR(iso?: string | null): string {
   return `${d}/${m}/${y}`
 }
 
+export const ncStatusLabel: Record<string, string> = {
+  aberta: 'Aberta',
+  em_andamento: 'Em andamento',
+  vencida: 'Vencida',
+  concluida: 'Concluída',
+  cancelada: 'Cancelada',
+}
+
+export const ncCriticidadeLabel: Record<string, string> = {
+  baixa: 'Baixa',
+  media: 'Média',
+  alta: 'Alta',
+  critica: 'Crítica',
+}
+
 export function iniciais(nome?: string | null): string {
   if (!nome) return '?'
   const parts = nome.trim().split(/\s+/)

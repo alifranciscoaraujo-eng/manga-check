@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { Execucao, ModeloItem, Resposta } from '../types'
+import type { Execucao, ModeloItem, Resposta, NaoConformidade, StatusNC, CriticidadeNC } from '../types'
 
 // ════════════════════════════════════════════════════════════
 //  Cadastros básicos
@@ -279,6 +279,142 @@ export async function criarExecucaoAvulsa(payload: {
     .single()
   if (error) throw error
   return data as Execucao
+}
+
+// ════════════════════════════════════════════════════════════
+//  Não Conformidades
+// ════════════════════════════════════════════════════════════
+
+export interface NcFiltros {
+  inicio?: string
+  fim?: string
+  status?: StatusNC
+  criticidade?: CriticidadeNC
+  setor_id?: string
+  responsavel_id?: string
+}
+
+export async function getNaoConformidades(f: NcFiltros = {}): Promise<NaoConformidade[]> {
+  let q = supabase.from('mc_nao_conformidades').select('*').order('criado_em', { ascending: false })
+  if (f.inicio) q = q.gte('data_abertura', f.inicio)
+  if (f.fim) q = q.lte('data_abertura', f.fim)
+  if (f.status) q = q.eq('status', f.status)
+  if (f.criticidade) q = q.eq('criticidade', f.criticidade)
+  if (f.setor_id) q = q.eq('setor_id', f.setor_id)
+  if (f.responsavel_id) q = q.eq('responsavel_id', f.responsavel_id)
+  const { data, error } = await q
+  if (error) throw error
+  return (data ?? []) as NaoConformidade[]
+}
+
+export async function getNaoConformidade(id: string): Promise<NaoConformidade> {
+  const { data, error } = await supabase.from('mc_nao_conformidades').select('*').eq('id', id).single()
+  if (error) throw error
+  return data as NaoConformidade
+}
+
+export async function updateNaoConformidade(id: string, payload: Partial<NaoConformidade>) {
+  const { data, error } = await supabase.from('mc_nao_conformidades').update(payload).eq('id', id).select().single()
+  if (error) throw error
+  return data
+}
+
+/** Gera NC automaticamente ao marcar resposta como não conforme. Idempotente. */
+export async function gerarNcSeNaoConforme(r: Resposta, exec: Execucao): Promise<void> {
+  if (!r.id) return
+  const { data: existing } = await supabase
+    .from('mc_nao_conformidades')
+    .select('id')
+    .eq('resposta_id', r.id)
+    .maybeSingle()
+  if (existing) return
+
+  const prazo = new Date()
+  prazo.setDate(prazo.getDate() + 3)
+
+  const { error } = await supabase.from('mc_nao_conformidades').insert({
+    execucao_id: exec.id,
+    resposta_id: r.id,
+    modelo_id: exec.modelo_id ?? null,
+    modelo_nome: exec.modelo_nome,
+    item_id: r.item_id ?? null,
+    item_descricao: r.item_descricao,
+    unidade_id: exec.unidade_id ?? null,
+    setor_id: exec.setor_id ?? null,
+    setor_nome: exec.setor_nome ?? null,
+    responsavel_id: exec.responsavel_id ?? null,
+    responsavel_nome: exec.responsavel_nome ?? null,
+    titulo: r.item_descricao,
+    descricao: r.observacao ?? null,
+    observacao: r.observacao ?? null,
+    foto_url: r.foto_url ?? null,
+    status: 'aberta',
+    criticidade: 'media',
+    data_abertura: exec.data,
+    prazo_correcao: prazo.toISOString().slice(0, 10),
+  })
+  if (error && !error.message.includes('uq_mc_nc_resposta')) throw error
+}
+
+export interface NcStats {
+  total: number
+  abertas: number
+  emAndamento: number
+  vencidas: number
+  concluidas: number
+  canceladas: number
+  criticas: number
+  porStatus: { status: string; label: string; count: number }[]
+  porSetor: { nome: string; count: number }[]
+  topItens: { descricao: string; count: number }[]
+}
+
+export async function getNcStats(f: DashboardFiltros): Promise<NcStats> {
+  let q = supabase.from('mc_nao_conformidades').select('*')
+    .gte('data_abertura', f.inicio)
+    .lte('data_abertura', f.fim)
+  if (f.setor_id) q = q.eq('setor_id', f.setor_id)
+  if (f.responsavel_id) q = q.eq('responsavel_id', f.responsavel_id)
+  const { data, error } = await q
+  if (error) throw error
+  const ncs = (data ?? []) as NaoConformidade[]
+
+  const hoje = new Date().toISOString().slice(0, 10)
+  const labels: Record<string, string> = {
+    aberta: 'Aberta', em_andamento: 'Em andamento',
+    vencida: 'Vencida', concluida: 'Concluída', cancelada: 'Cancelada',
+  }
+
+  const groupStatus: Record<string, number> = {}
+  const groupSetor: Record<string, number> = {}
+  const groupItem: Record<string, number> = {}
+
+  let abertas = 0, emAndamento = 0, vencidas = 0, concluidas = 0, canceladas = 0, criticas = 0
+
+  for (const n of ncs) {
+    groupStatus[n.status] = (groupStatus[n.status] ?? 0) + 1
+    if (n.setor_nome) groupSetor[n.setor_nome] = (groupSetor[n.setor_nome] ?? 0) + 1
+    if (n.item_descricao) groupItem[n.item_descricao] = (groupItem[n.item_descricao] ?? 0) + 1
+    if (n.status === 'aberta') abertas++
+    if (n.status === 'em_andamento') emAndamento++
+    if (n.status === 'vencida' || (n.status === 'aberta' && n.prazo_correcao && n.prazo_correcao < hoje)) vencidas++
+    if (n.status === 'concluida') concluidas++
+    if (n.status === 'cancelada') canceladas++
+    if (n.criticidade === 'critica' || n.criticidade === 'alta') criticas++
+  }
+
+  return {
+    total: ncs.length,
+    abertas,
+    emAndamento,
+    vencidas,
+    concluidas,
+    canceladas,
+    criticas,
+    porStatus: Object.entries(groupStatus).map(([status, count]) => ({ status, label: labels[status] ?? status, count })),
+    porSetor: Object.entries(groupSetor).map(([nome, count]) => ({ nome, count })).sort((a, b) => b.count - a.count),
+    topItens: Object.entries(groupItem).map(([descricao, count]) => ({ descricao, count })).sort((a, b) => b.count - a.count).slice(0, 5),
+  }
 }
 
 // ════════════════════════════════════════════════════════════
