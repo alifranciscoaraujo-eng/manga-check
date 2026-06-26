@@ -1,32 +1,40 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  PieChart, Pie, Cell,
 } from 'recharts'
-import { TrendingUp, Trophy, Layers, Clock, Info, ChevronRight, Store, Gauge } from 'lucide-react'
 import {
-  getDashboardData, getExecucoesHoje, getUnidades, getSetores, getColaboradores,
-  type DashboardData, type RankingItem,
+  TrendingUp, Trophy, Layers, Clock, Info, ChevronRight,
+  Store, Gauge, AlertTriangle, CheckCircle2, ShieldAlert,
+  FileDown, Loader2,
+} from 'lucide-react'
+import {
+  getDashboardData, getNcStats, getExecucoesHoje,
+  getUnidades, getSetores, getColaboradores,
+  type DashboardData, type RankingItem, type NcStats,
 } from '../lib/queries'
 import type { Unidade, Setor, Colaborador, Execucao } from '../types'
 import { pct, iniciais, hhmm } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
+import { gerarRelatorioPdf } from '../lib/gerarPdf'
 import ProgressBar from '../components/UI/ProgressBar'
 import StatusDot from '../components/UI/StatusDot'
+import KpiCard from '../components/UI/KpiCard'
 
 type Periodo = '7' | '30' | 'mes'
 
-function intervalo(periodo: Periodo): { inicio: string; fim: string; label: string } {
+function intervalo(p: Periodo) {
   const hoje = new Date()
   const fim = hoje.toISOString().slice(0, 10)
-  if (periodo === 'mes') {
+  if (p === 'mes') {
     const ini = new Date(hoje.getFullYear(), hoje.getMonth(), 1)
     return { inicio: ini.toISOString().slice(0, 10), fim, label: 'Este mês' }
   }
-  const dias = periodo === '7' ? 6 : 29
-  const ini = new Date(hoje)
-  ini.setDate(ini.getDate() - dias)
-  return { inicio: ini.toISOString().slice(0, 10), fim, label: periodo === '7' ? 'Últimos 7 dias' : 'Últimos 30 dias' }
+  const dias = p === '7' ? 6 : 29
+  const ini = new Date(hoje); ini.setDate(ini.getDate() - dias)
+  return { inicio: ini.toISOString().slice(0, 10), fim, label: p === '7' ? 'Últimos 7 dias' : 'Últimos 30 dias' }
 }
 
 function saudacao(): string {
@@ -36,6 +44,27 @@ function saudacao(): string {
   return 'Boa noite'
 }
 
+function progressoTone(status: Execucao['status']): 'emerald' | 'amber' | 'red' | 'slate' {
+  return status === 'finalizado' ? 'emerald' : status === 'atrasado' ? 'red' : status === 'em_andamento' ? 'amber' : 'slate'
+}
+
+const NC_STATUS_COLORS: Record<string, string> = {
+  aberta: '#ef4444', em_andamento: '#f59e0b',
+  vencida: '#dc2626', concluida: '#10b981', cancelada: '#94a3b8',
+}
+
+function gerarAlertas(dash: DashboardData, nc: NcStats, label: string): { msg: string; ok: boolean }[] {
+  const avisos: { msg: string; ok: boolean }[] = []
+  const score = Math.round(dash.metricas.score)
+  if (nc.criticas > 0) avisos.push({ msg: `${nc.criticas} NC${nc.criticas > 1 ? 's' : ''} de alta criticidade em aberto. Ação imediata necessária.`, ok: false })
+  if (nc.vencidas > 0) avisos.push({ msg: `${nc.vencidas} NC${nc.vencidas > 1 ? 's' : ''} com prazo vencido sem resolução.`, ok: false })
+  if (score < 70) avisos.push({ msg: `Score ${score}% abaixo do padrão recomendado (70%). Revisar processos.`, ok: false })
+  if (dash.metricas.atrasado > 0) avisos.push({ msg: `${dash.metricas.atrasado} checklist${dash.metricas.atrasado > 1 ? 's' : ''} atrasado${dash.metricas.atrasado > 1 ? 's' : ''} no período de ${label}.`, ok: false })
+  if (nc.porSetor[0]) avisos.push({ msg: `Setor "${nc.porSetor[0].nome}" concentra o maior número de NCs.`, ok: false })
+  if (avisos.length === 0) avisos.push({ msg: 'Nenhum alerta crítico. Operação dentro do padrão.', ok: true })
+  return avisos
+}
+
 export default function Dashboard() {
   const { nome } = useAuth()
   const navigate = useNavigate()
@@ -43,39 +72,55 @@ export default function Dashboard() {
   const [setorId, setSetorId] = useState('')
   const [responsavelId, setResponsavelId] = useState('')
 
-  const [empresa, setEmpresa] = useState<string>('')
+  const [empresa, setEmpresa] = useState('')
   const [setores, setSetores] = useState<Setor[]>([])
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([])
   const [hoje, setHoje] = useState<Execucao[]>([])
 
   const [data, setData] = useState<DashboardData | null>(null)
+  const [nc, setNc] = useState<NcStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [gerandoPdf, setGerandoPdf] = useState(false)
 
   const { inicio, fim, label } = useMemo(() => intervalo(periodo), [periodo])
 
   useEffect(() => {
-    Promise.all([getUnidades(), getSetores(), getColaboradores(), getExecucoesHoje()]).then(([u, s, c, h]) => {
-      setEmpresa(((u as Unidade[])[0]?.nome) ?? '')
-      setSetores(s as Setor[]); setColaboradores(c as Colaborador[]); setHoje(h)
-    })
+    Promise.all([getUnidades(), getSetores(), getColaboradores(), getExecucoesHoje()])
+      .then(([u, s, c, h]) => {
+        setEmpresa(((u as Unidade[])[0]?.nome) ?? '')
+        setSetores(s as Setor[]); setColaboradores(c as Colaborador[]); setHoje(h)
+      })
   }, [])
 
   useEffect(() => {
     setLoading(true)
-    getDashboardData({ inicio, fim, setor_id: setorId || undefined, responsavel_id: responsavelId || undefined })
-      .then(setData)
+    const filtros = { inicio, fim, setor_id: setorId || undefined, responsavel_id: responsavelId || undefined }
+    Promise.all([getDashboardData(filtros), getNcStats(filtros)])
+      .then(([d, n]) => { setData(d); setNc(n) })
       .finally(() => setLoading(false))
   }, [inicio, fim, setorId, responsavelId])
 
   const m = data?.metricas
   const dataHoje = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })
   const concluidosHoje = hoje.filter((e) => e.status === 'finalizado').length
-
   const evolucaoChart = (data?.evolucao ?? []).map((d) => ({ ...d, label: `${d.data.slice(8, 10)}/${d.data.slice(5, 7)}` }))
+
+  async function exportarPdf() {
+    if (!data || !nc) return
+    setGerandoPdf(true)
+    try {
+      const setorNome = setorId ? setores.find(s => s.id === setorId)?.nome : undefined
+      const respNome = responsavelId ? colaboradores.find(c => c.id === responsavelId)?.nome : undefined
+      gerarRelatorioPdf({ periodo: label, setor: setorNome, responsavel: respNome, metricas: data.metricas, ncStats: nc, evolucao: data.evolucao })
+    } finally {
+      setGerandoPdf(false)
+    }
+  }
 
   return (
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto">
-      {/* Cabeçalho */}
+
+      {/* ── Cabeçalho ── */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 tracking-tight">
@@ -83,20 +128,25 @@ export default function Dashboard() {
           </h1>
           <p className="text-sm text-slate-500 flex items-center flex-wrap gap-x-2">
             <span className="capitalize">{dataHoje}</span>
-            {empresa && <span className="text-slate-300">•</span>}
-            {empresa && <span className="font-medium text-slate-600 inline-flex items-center gap-1"><Store size={13} /> {empresa}</span>}
+            {empresa && <><span className="text-slate-300">•</span><span className="font-medium text-slate-600 inline-flex items-center gap-1"><Store size={13} /> {empresa}</span></>}
           </p>
         </div>
-        <div className="flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-sm">
-          <Gauge size={20} className="text-emerald-600" />
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-400 leading-none">Score geral</p>
-            <p className="text-lg font-extrabold text-slate-800 leading-tight">{pct(m?.score ?? 0)}</p>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-sm">
+            <Gauge size={18} className="text-emerald-600" />
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 leading-none">Score geral</p>
+              <p className="text-lg font-extrabold text-slate-800 leading-tight">{pct(m?.score ?? 0)}</p>
+            </div>
           </div>
+          <button onClick={exportarPdf} disabled={gerandoPdf || loading} className="btn-secondary">
+            {gerandoPdf ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
+            Relatório PDF
+          </button>
         </div>
       </div>
 
-      {/* Filtros */}
+      {/* ── Filtros ── */}
       <div className="flex flex-wrap items-center gap-2 mb-5">
         <select className="select-field w-auto" value={periodo} onChange={(e) => setPeriodo(e.target.value as Periodo)}>
           <option value="mes">Este mês</option>
@@ -113,17 +163,21 @@ export default function Dashboard() {
         </select>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-5">
-        <KpiTotal value={m?.total ?? 0} />
-        <KpiCard label="Não iniciado" value={m?.naoIniciado ?? 0} total={m?.total ?? 0} tone="neutral" />
-        <KpiCard label="Em andamento" value={m?.emAndamento ?? 0} total={m?.total ?? 0} tone="amber" />
-        <KpiCard label="Atrasado" value={m?.atrasado ?? 0} total={m?.total ?? 0} tone="red" />
-        <KpiCard label="Finalizado" value={m?.finalizados ?? 0} total={m?.total ?? 0} tone="emerald" />
+      {/* ── KPIs Checklists ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+        <KpiCard label="Agendados" value={m?.total ?? 0} tone="dark" subtitle="no período" className="col-span-2 lg:col-span-1" />
+        <KpiCard label="Não iniciado" value={m?.naoIniciado ?? 0}
+          subtitle={m?.total ? `${Math.round((m.naoIniciado / m.total) * 100)}%` : '—'} tone="slate" />
+        <KpiCard label="Em andamento" value={m?.emAndamento ?? 0}
+          subtitle={m?.total ? `${Math.round((m.emAndamento / m.total) * 100)}%` : '—'} tone="amber" />
+        <KpiCard label="Atrasado" value={m?.atrasado ?? 0}
+          subtitle={m?.total ? `${Math.round((m.atrasado / m.total) * 100)}%` : '—'} tone={m?.atrasado ? 'red' : 'slate'} />
+        <KpiCard label="Finalizado" value={m?.finalizados ?? 0}
+          subtitle={m?.total ? `${Math.round((m.finalizados ?? 0 / m.total) * 100)}%` : '—'} tone="emerald" />
       </div>
 
-      {/* Checklists do dia + Taxa de conclusão */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-5">
+      {/* ── Checklists do dia + Taxa de conclusão ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
         <div className="card p-5 xl:col-span-2">
           <div className="flex items-center justify-between mb-3">
             <div>
@@ -173,23 +227,41 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Rankings */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-        <RankingCard titulo="Ranking da equipe" icon={Trophy} itens={data?.rankingUsuarios ?? []} avatar />
-        <RankingCard titulo="Desempenho por setor" icon={Layers} itens={data?.rankingSetores ?? []} />
-        <RankingCard titulo="Desempenho por turno" icon={Clock} itens={data?.rankingTurnos ?? []} />
+      {/* ── KPIs Não Conformidades ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        <KpiCard label="NCs abertas" value={nc?.abertas ?? 0} icon={AlertTriangle} tone={nc?.abertas ? 'red' : 'slate'} subtitle="aguardando tratativa" />
+        <KpiCard label="Alta criticidade" value={nc?.criticas ?? 0} icon={ShieldAlert} tone={nc?.criticas ? 'amber' : 'slate'} subtitle="alta + crítica" />
+        <KpiCard label="Prazo vencido" value={nc?.vencidas ?? 0} icon={Clock} tone={nc?.vencidas ? 'red' : 'slate'} subtitle="sem resolução" />
+        <KpiCard label="NCs concluídas" value={nc?.concluidas ?? 0} icon={CheckCircle2} tone="emerald" subtitle="resolvidas" />
       </div>
 
-      {/* Evolução */}
-      <div className="card p-5">
+      {/* ── Alertas executivos ── */}
+      {data && nc && (
+        <div className="card p-4 mb-4">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+            <AlertTriangle size={13} className="text-amber-500" /> Alertas
+          </p>
+          <div className="space-y-1.5">
+            {gerarAlertas(data, nc, label).map((a, i) => (
+              <div key={i} className={`flex items-start gap-2.5 text-sm rounded-xl px-3.5 py-2.5 ${a.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
+                <span className="shrink-0 mt-0.5">{a.ok ? '✓' : '⚠'}</span>
+                <span>{a.msg}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Evolução ── */}
+      <div className="card p-5 mb-4">
         <div className="flex items-center gap-2 mb-1">
           <TrendingUp size={16} className="text-emerald-600" />
           <p className="font-semibold text-slate-800">Evolução dos indicadores</p>
         </div>
-        <p className="text-xs text-slate-400 mb-4">Pontualidade, esforço, qualidade e score por dia · {label}</p>
-        <div className="h-72">
+        <p className="text-xs text-slate-400 mb-4">Pontualidade, qualidade e score por dia · {label}</p>
+        <div className="h-64">
           {loading ? (
-            <div className="h-full flex items-center justify-center text-sm text-slate-400">Carregando...</div>
+            <div className="h-full flex items-center justify-center text-sm text-slate-400"><Loader2 size={18} className="animate-spin mr-2" /> Carregando...</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={evolucaoChart} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
@@ -200,61 +272,99 @@ export default function Dashboard() {
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Line type="monotone" dataKey="score" name="Score" stroke="#0f172a" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="pontualidade" name="Pontualidade" stroke="#10b981" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="esforco" name="Esforço" stroke="#3b82f6" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="qualidade" name="Qualidade" stroke="#f59e0b" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           )}
         </div>
       </div>
-    </div>
-  )
-}
 
-function progressoTone(status: Execucao['status']): 'emerald' | 'amber' | 'red' | 'slate' {
-  return status === 'finalizado' ? 'emerald' : status === 'atrasado' ? 'red' : status === 'em_andamento' ? 'amber' : 'slate'
-}
+      {/* ── NC por setor + NC por status ── */}
+      {nc && (nc.porSetor.length > 0 || nc.porStatus.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+          {nc.porSetor.length > 0 && (
+            <div className="card p-5">
+              <p className="font-semibold text-slate-800 mb-1">NCs por setor</p>
+              <p className="text-xs text-slate-400 mb-4">Concentração de falhas por área</p>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={nc.porSetor} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                    <XAxis dataKey="nome" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                    <Bar dataKey="count" name="NCs" fill="#ef4444" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
-function KpiTotal({ value }: { value: number }) {
-  return (
-    <div className="card p-4 col-span-2 flex flex-col justify-center bg-gradient-to-br from-slate-900 to-slate-800 border-transparent">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Agendados (total)</p>
-      <p className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white mt-1">{value.toLocaleString('pt-BR')}</p>
-      <p className="text-xs text-slate-400 mt-1">checklists no período</p>
-    </div>
-  )
-}
+          {nc.porStatus.length > 0 && (
+            <div className="card p-5">
+              <p className="font-semibold text-slate-800 mb-1">NCs por status</p>
+              <p className="text-xs text-slate-400 mb-4">Situação atual das não conformidades</p>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={nc.porStatus} dataKey="count" nameKey="label" cx="40%" cy="50%" outerRadius={72} innerRadius={38} paddingAngle={2}>
+                      {nc.porStatus.map((entry) => (
+                        <Cell key={entry.status} fill={NC_STATUS_COLORS[entry.status] ?? '#94a3b8'} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                    <Legend iconType="circle" iconSize={9} wrapperStyle={{ fontSize: 11 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
-function KpiCard({ label, value, total, tone }: { label: string; value: number; total: number; tone: 'neutral' | 'amber' | 'red' | 'emerald' }) {
-  const p = total ? Math.round((value / total) * 100) : 0
-  const c = {
-    neutral: { bg: 'bg-white', num: 'text-slate-800', pill: 'bg-slate-100 text-slate-500', bar: 'bg-slate-300', border: '' },
-    amber: { bg: 'bg-amber-50', num: 'text-amber-600', pill: 'bg-amber-100 text-amber-700', bar: 'bg-amber-400', border: 'border-transparent' },
-    red: { bg: 'bg-red-50', num: 'text-red-600', pill: 'bg-red-100 text-red-600', bar: 'bg-red-400', border: 'border-transparent' },
-    emerald: { bg: 'bg-emerald-50', num: 'text-emerald-600', pill: 'bg-emerald-100 text-emerald-700', bar: 'bg-emerald-500', border: 'border-transparent' },
-  }[tone]
-  return (
-    <div className={`card p-4 ${c.bg} ${c.border} flex flex-col`}>
-      <div className="flex items-start justify-between gap-2">
-        <p className="kpi-label leading-tight">{label}</p>
-        <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${c.pill}`}>{p}%</span>
+      {/* ── Top 5 itens mais não conformes ── */}
+      {nc && nc.topItens.length > 0 && (
+        <div className="card p-5 mb-4">
+          <p className="font-semibold text-slate-800 mb-1">Top 5 itens mais não conformes</p>
+          <p className="text-xs text-slate-400 mb-4">Itens com maior incidência de falhas no período</p>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                layout="vertical"
+                data={nc.topItens.map(it => ({ ...it, nome: it.descricao.length > 45 ? it.descricao.slice(0, 45) + '…' : it.descricao }))}
+                margin={{ top: 0, right: 20, left: 8, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <YAxis type="category" dataKey="nome" tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} width={170} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                <Bar dataKey="count" name="Ocorrências" fill="#f59e0b" radius={[0, 6, 6, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* ── Rankings ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <RankingCard titulo="Ranking da equipe" icon={Trophy} itens={data?.rankingUsuarios ?? []} avatar />
+        <RankingCard titulo="Desempenho por setor" icon={Layers} itens={data?.rankingSetores ?? []} />
+        <RankingCard titulo="Desempenho por turno" icon={Clock} itens={data?.rankingTurnos ?? []} />
       </div>
-      <p className={`text-2xl sm:text-3xl font-extrabold tracking-tight mt-2 ${c.num}`}>{value.toLocaleString('pt-BR')}</p>
-      <div className="mt-3 h-1 rounded-full bg-black/5 overflow-hidden">
-        <div className={`h-full rounded-full ${c.bar}`} style={{ width: `${p}%` }} />
-      </div>
+
     </div>
   )
 }
 
+// ── Sub-componentes ────────────────────────────────────────
 function Donut({ value }: { value: number }) {
   const v = Math.round(value)
   return (
     <div className="flex items-center justify-center py-2">
-      <div className="relative w-36 h-36 rounded-full" style={{ background: `conic-gradient(#10b981 ${v * 3.6}deg, #eef2f6 0deg)` }}>
-        <div className="absolute inset-[13px] bg-white rounded-full flex flex-col items-center justify-center">
-          <span className="text-3xl font-extrabold text-slate-800">{v}%</span>
-          <span className="text-xs text-slate-400">concluído</span>
+      <div className="relative w-32 h-32 rounded-full" style={{ background: `conic-gradient(#10b981 ${v * 3.6}deg, #eef2f6 0deg)` }}>
+        <div className="absolute inset-[12px] bg-white rounded-full flex flex-col items-center justify-center">
+          <span className="text-2xl font-extrabold text-slate-800">{v}%</span>
+          <span className="text-[10px] text-slate-400">concluído</span>
         </div>
       </div>
     </div>
@@ -292,3 +402,5 @@ function RankingCard({ titulo, icon: Icon, itens, avatar }: { titulo: string; ic
     </div>
   )
 }
+
+

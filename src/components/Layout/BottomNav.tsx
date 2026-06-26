@@ -1,10 +1,10 @@
 import { NavLink, useLocation } from 'react-router-dom'
-import { LayoutDashboard, ListChecks, AlertTriangle, Building2 } from 'lucide-react'
+import { BarChart2, ListChecks, AlertTriangle, Building2 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../hooks/useAuth'
 
 const itemsGestor = [
-  { label: 'Início', href: '/', icon: LayoutDashboard },
+  { label: 'Painel', href: '/', icon: BarChart2 },
   { label: 'Checklists', href: '/meus-checklists', icon: ListChecks },
   { label: 'NCs', href: '/nao-conformidades', icon: AlertTriangle },
   { label: 'Cadastros', href: '/cadastros', icon: Building2 },

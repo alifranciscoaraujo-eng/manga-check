@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, ListChecks, FileText, CalendarClock, Building2,
+  ListChecks, FileText, CalendarClock, Building2,
   ClipboardCheck, X, LogOut, AlertTriangle, BarChart2,
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -12,8 +12,7 @@ const navGestor = [
   {
     section: '',
     items: [
-      { label: 'Dashboard', href: '/', icon: LayoutDashboard },
-      { label: 'Painel Executivo', href: '/painel-executivo', icon: BarChart2 },
+      { label: 'Painel Executivo', href: '/', icon: BarChart2 },
     ],
   },
   {
