@@ -3,14 +3,15 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import {
   ArrowLeft, MapPin, FolderOpen, User, Check, X, MinusCircle,
-  Camera, Loader2, CheckCircle2, AlertTriangle, ListChecks, ChevronRight,
+  Camera, Loader2, CheckCircle2, AlertTriangle, ListChecks, ChevronRight, Trash2, Plus,
 } from 'lucide-react'
 import clsx from 'clsx'
 import {
   getExecucao, getRespostas, iniciarExecucao, updateResposta, updateExecucao,
   finalizarExecucao, uploadEvidencia, gerarNcSeNaoConforme,
+  getFotosPorRespostas, addFotoResposta, deleteFotoResposta,
 } from '../lib/queries'
-import type { Execucao, Resposta, StatusResposta } from '../types'
+import type { Execucao, Resposta, RespostaFoto, StatusResposta } from '../types'
 import { hhmm } from '../lib/format'
 import ProgressBar from '../components/UI/ProgressBar'
 import StatusBadge from '../components/UI/StatusBadge'
@@ -21,9 +22,10 @@ export default function ExecucaoChecklist() {
   const { colaborador, isColaborador } = useAuth()
   const [exec, setExec] = useState<Execucao | null>(null)
   const [respostas, setRespostas] = useState<Resposta[]>([])
+  const [fotosMap, setFotosMap] = useState<Record<string, RespostaFoto[]>>({})
   const [loading, setLoading] = useState(true)
   const [finalizando, setFinalizando] = useState(false)
-  const [ncCount, setNcCount] = useState<number | null>(null)   // null = não finalizado ainda
+  const [ncCount, setNcCount] = useState<number | null>(null)
 
   const readOnly = exec?.status === 'finalizado'
   const initId = useRef<string | null>(null)
@@ -34,6 +36,9 @@ export default function ExecucaoChecklist() {
       setExec(e)
       const rs = e.status === 'finalizado' ? await getRespostas(e.id) : await iniciarExecucao(e)
       setRespostas(rs)
+      const ids = rs.map((r) => r.id)
+      const fotos = await getFotosPorRespostas(ids)
+      setFotosMap(fotos)
     } catch {
       navigate('/meus-checklists', { replace: true })
     } finally {
@@ -66,7 +71,6 @@ export default function ExecucaoChecklist() {
     setRespostas(novas)
     await updateResposta(r.id, { status, respondido_em })
     await persistProgresso(novas)
-    // Geração automática de NC para itens não conformes
     if (status === 'nao_conforme') {
       await gerarNcSeNaoConforme(atualizada, exec)
     }
@@ -76,6 +80,26 @@ export default function ExecucaoChecklist() {
     const novas = respostas.map((x) => (x.id === r.id ? { ...x, observacao } : x))
     setRespostas(novas)
     await updateResposta(r.id, { observacao })
+  }
+
+  async function handleAddFoto(r: Resposta, file: File) {
+    const url = await uploadEvidencia(file)
+    const nova = await addFotoResposta(r.id, url)
+    setFotosMap((prev) => {
+      const arr = [...(prev[r.id] ?? []), nova]
+      // Sync foto_url (first photo) to the resposta for NC backward-compat
+      updateResposta(r.id, { foto_url: arr[0].url })
+      return { ...prev, [r.id]: arr }
+    })
+  }
+
+  async function handleDeleteFoto(r: Resposta, fotoId: string) {
+    await deleteFotoResposta(fotoId)
+    setFotosMap((prev) => {
+      const arr = (prev[r.id] ?? []).filter((f) => f.id !== fotoId)
+      updateResposta(r.id, { foto_url: arr[0]?.url ?? null })
+      return { ...prev, [r.id]: arr }
+    })
   }
 
   async function finalizar() {
@@ -99,7 +123,6 @@ export default function ExecucaoChecklist() {
 
   const todasRespondidas = total > 0 && respondidas === total
 
-  // Tela de conclusão
   if (ncCount !== null) {
     return (
       <div className="p-4 sm:p-6 max-w-md mx-auto mt-8">
@@ -108,9 +131,7 @@ export default function ExecucaoChecklist() {
             <CheckCircle2 size={32} className="text-emerald-600" />
           </div>
           <h2 className="text-xl font-extrabold text-slate-800 mb-2">Checklist finalizado!</h2>
-          <p className="text-sm text-slate-500 mb-5">
-            {exec.modelo_nome} concluído com sucesso.
-          </p>
+          <p className="text-sm text-slate-500 mb-5">{exec.modelo_nome} concluído com sucesso.</p>
 
           {ncCount > 0 ? (
             <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5 text-left">
@@ -148,7 +169,6 @@ export default function ExecucaoChecklist() {
         <ArrowLeft size={16} /> Voltar
       </button>
 
-      {/* Cabeçalho da execução */}
       <div className="card p-5 mb-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -171,14 +191,22 @@ export default function ExecucaoChecklist() {
         </div>
       </div>
 
-      {/* Itens */}
       <div className="space-y-3">
         {respostas.map((r, i) => (
-          <ItemCard key={r.id} r={r} index={i + 1} readOnly={readOnly} onStatus={setStatus} onObs={setObservacao} />
+          <ItemCard
+            key={r.id}
+            r={r}
+            index={i + 1}
+            readOnly={readOnly}
+            fotos={fotosMap[r.id] ?? []}
+            onStatus={setStatus}
+            onObs={setObservacao}
+            onAddFoto={handleAddFoto}
+            onDeleteFoto={handleDeleteFoto}
+          />
         ))}
       </div>
 
-      {/* Rodapé fixo */}
       {!readOnly && (
         <div className="fixed bottom-0 lg:bottom-0 inset-x-0 lg:left-64 bg-white/95 backdrop-blur border-t border-slate-200 p-4 z-20">
           <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
@@ -197,28 +225,39 @@ export default function ExecucaoChecklist() {
 }
 
 function ItemCard({
-  r, index, readOnly, onStatus, onObs,
+  r, index, readOnly, fotos, onStatus, onObs, onAddFoto, onDeleteFoto,
 }: {
   r: Resposta
   index: number
   readOnly: boolean
+  fotos: RespostaFoto[]
   onStatus: (r: Resposta, s: StatusResposta) => void
   onObs: (r: Resposta, v: string) => void
+  onAddFoto: (r: Resposta, file: File) => Promise<void>
+  onDeleteFoto: (r: Resposta, id: string) => Promise<void>
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
-  const [fotoUrl, setFotoUrl] = useState(r.foto_url ?? null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const isNaoConforme = r.status === 'nao_conforme'
+  const showFotoSection = r.exige_foto || isNaoConforme || fotos.length > 0
 
   async function handleFoto(file: File) {
     setUploading(true)
     try {
-      const url = await uploadEvidencia(file)
-      await updateResposta(r.id, { foto_url: url })
-      setFotoUrl(url)
+      await onAddFoto(r, file)
     } finally {
       setUploading(false)
+    }
+  }
+
+  async function handleDelete(fotoId: string) {
+    setDeletingId(fotoId)
+    try {
+      await onDeleteFoto(r, fotoId)
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -247,20 +286,49 @@ function ItemCard({
             <StatusButton active={r.status === 'na'} onClick={() => onStatus(r, 'na')} disabled={readOnly} tone="slate" icon={MinusCircle} label="N/A" />
           </div>
 
-          {/* Foto — aparece com destaque quando não conforme */}
-          {(r.exige_foto || isNaoConforme) && (
+          {/* Galeria de fotos */}
+          {showFotoSection && (
             <div className="mt-3">
-              {fotoUrl ? (
-                <div className="flex items-center gap-2">
-                  <img src={fotoUrl} alt="evidência" className="w-16 h-16 rounded-lg object-cover border border-slate-200" />
-                  {!readOnly && (
-                    <button onClick={() => fileRef.current?.click()} className="text-xs text-slate-500 hover:text-emerald-600">Trocar foto</button>
+              {fotos.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {fotos.map((f) => (
+                    <div key={f.id} className="relative group">
+                      <img
+                        src={f.url}
+                        alt="evidência"
+                        className="w-16 h-16 rounded-lg object-cover border border-slate-200"
+                      />
+                      {!readOnly && (
+                        <button
+                          onClick={() => handleDelete(f.id)}
+                          disabled={deletingId === f.id}
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-60"
+                        >
+                          {deletingId === f.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Botão de adicionar mais fotos */}
+                  {!readOnly && fotos.length < 5 && (
+                    <button
+                      onClick={() => fileRef.current?.click()}
+                      disabled={uploading}
+                      className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 hover:border-emerald-400 hover:text-emerald-600 transition-colors disabled:opacity-60"
+                    >
+                      {uploading ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                      <span className="text-[10px] mt-0.5">{uploading ? '...' : 'Foto'}</span>
+                    </button>
                   )}
                 </div>
-              ) : (
+              )}
+
+              {/* Botão inicial quando não há fotos */}
+              {fotos.length === 0 && !readOnly && (
                 <button
                   onClick={() => fileRef.current?.click()}
-                  disabled={readOnly || uploading}
+                  disabled={uploading}
                   className={clsx(
                     'flex items-center gap-2 text-xs font-medium rounded-lg px-3 py-2 transition-colors disabled:opacity-60',
                     isNaoConforme
@@ -272,18 +340,22 @@ function ItemCard({
                   {uploading ? 'Enviando...' : isNaoConforme ? 'Anexar evidência da falha' : 'Anexar foto de evidência'}
                 </button>
               )}
+
+              {fotos.length > 0 && (
+                <p className="text-[11px] text-slate-400 mt-1">{fotos.length} foto{fotos.length > 1 ? 's' : ''} · máx. 5</p>
+              )}
+
               <input
                 ref={fileRef}
                 type="file"
                 accept="image/*"
                 capture="environment"
                 className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFoto(f) }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFoto(f); e.target.value = '' }}
               />
             </div>
           )}
 
-          {/* Observação — obrigatória quando não conforme */}
           {!readOnly ? (
             <input
               className={clsx('input-field mt-3 text-sm', isNaoConforme && 'border-red-200 focus:ring-red-500/50 focus:border-red-400')}

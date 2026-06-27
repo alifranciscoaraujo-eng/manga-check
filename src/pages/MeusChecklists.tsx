@@ -118,9 +118,17 @@ export default function MeusChecklists() {
         <div className="card p-10 text-center text-slate-400 text-sm">Nenhum checklist agendado para hoje.</div>
       ) : (
         <div className="space-y-2.5">
-          {lista.map((ex) => (
-            <ChecklistCard key={ex.id} ex={ex} onOpen={() => navigate(`/meus-checklists/${ex.id}`)} />
-          ))}
+          {lista.map((ex) => {
+            const modelo = modelos.find((m) => m.id === ex.modelo_id)
+            return (
+              <ChecklistCard
+                key={ex.id}
+                ex={ex}
+                descricao={modelo?.descricao ?? null}
+                onOpen={() => navigate(`/meus-checklists/${ex.id}`)}
+              />
+            )
+          })}
         </div>
       )}
 
@@ -172,7 +180,7 @@ export default function MeusChecklists() {
   )
 }
 
-function ChecklistCard({ ex, onOpen }: { ex: Execucao; onOpen: () => void }) {
+function ChecklistCard({ ex, descricao, onOpen }: { ex: Execucao; descricao?: string | null; onOpen: () => void }) {
   return (
     <button onClick={onOpen} className="card w-full text-left p-3.5 sm:p-4 hover:shadow-md hover:border-slate-200 transition-all flex items-center gap-3.5 group">
       <div className="w-12 text-center shrink-0">
@@ -182,6 +190,9 @@ function ChecklistCard({ ex, onOpen }: { ex: Execucao; onOpen: () => void }) {
       <div className="w-px self-stretch bg-slate-100" />
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-slate-800 leading-tight truncate">{ex.modelo_nome}</p>
+        {descricao && (
+          <p className="text-xs text-slate-500 truncate mt-0.5 italic">{descricao}</p>
+        )}
         <p className="text-xs text-slate-400 truncate mt-0.5">
           {[ex.setor_nome, ex.responsavel_nome].filter(Boolean).join(' · ')}
         </p>

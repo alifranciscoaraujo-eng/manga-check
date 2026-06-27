@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { Execucao, ModeloItem, Resposta, NaoConformidade, StatusNC, CriticidadeNC } from '../types'
+import type { Execucao, ModeloItem, Resposta, RespostaFoto, NaoConformidade, StatusNC, CriticidadeNC } from '../types'
 
 // ════════════════════════════════════════════════════════════
 //  Cadastros básicos
@@ -237,6 +237,38 @@ export async function uploadEvidencia(file: File): Promise<string> {
   if (error) throw error
   const { data } = supabase.storage.from('mc-evidencias').getPublicUrl(path)
   return data.publicUrl
+}
+
+// ── Múltiplas fotos por resposta ──────────────────────────
+export async function getFotosPorRespostas(respostaIds: string[]): Promise<Record<string, RespostaFoto[]>> {
+  if (!respostaIds.length) return {}
+  const { data, error } = await supabase
+    .from('mc_respostas_fotos')
+    .select('*')
+    .in('resposta_id', respostaIds)
+    .order('criado_em', { ascending: true })
+  if (error) throw error
+  const map: Record<string, RespostaFoto[]> = {}
+  for (const f of (data ?? []) as RespostaFoto[]) {
+    if (!map[f.resposta_id]) map[f.resposta_id] = []
+    map[f.resposta_id].push(f)
+  }
+  return map
+}
+
+export async function addFotoResposta(respostaId: string, url: string): Promise<RespostaFoto> {
+  const { data, error } = await supabase
+    .from('mc_respostas_fotos')
+    .insert({ resposta_id: respostaId, url })
+    .select()
+    .single()
+  if (error) throw error
+  return data as RespostaFoto
+}
+
+export async function deleteFotoResposta(id: string): Promise<void> {
+  const { error } = await supabase.from('mc_respostas_fotos').delete().eq('id', id)
+  if (error) throw error
 }
 
 /** Cria uma execução avulsa (fora do cron) para hoje. */

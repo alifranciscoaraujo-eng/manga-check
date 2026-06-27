@@ -118,6 +118,13 @@ export interface NaoConformidade {
   atualizado_em: string
 }
 
+export interface RespostaFoto {
+  id: string
+  resposta_id: string
+  url: string
+  criado_em: string
+}
+
 export interface Resposta {
   id: string
   execucao_id: string
